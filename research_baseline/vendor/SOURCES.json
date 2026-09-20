@@ -1,0 +1,67 @@
+[
+  {
+    "file": "protocol.py",
+    "source": "Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition\\agent_loop.py",
+    "symbols": [
+      "_extract_between",
+      "_normalize_answer",
+      "_extract_tool_call"
+    ],
+    "upstream_sha256": "a7f04450408e8d7f8694cf502952b6d242b8773456c14810eb186f293e71022d",
+    "vendored_sha256": "20419ff5e72d45c69a619718cf5d6572711d8a08490fc6e4048ec98553dfc883"
+  },
+  {
+    "file": "search_format.py",
+    "source": "Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition\\tools_search.py",
+    "symbols": [
+      "_contains_chinese",
+      "_serper_evidence_items",
+      "_iqs_evidence_items",
+      "_format_serper_results",
+      "_format_search_results"
+    ],
+    "upstream_sha256": "e476b415b640470066d522142a27b615e3e3742230d767e69f9f91f25071a74c",
+    "vendored_sha256": "89c1386c7d7b529d18abeb60359665e6d416661c0faba6ee1b8e4c916128460c"
+  },
+  {
+    "file": "html_reader.py",
+    "source": "Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition\\tools_visit.py",
+    "symbols": [
+      "extract_main_text",
+      "ExtractionResult",
+      "_parse_extraction"
+    ],
+    "upstream_sha256": "e741c8e6c4e425b8591ad973a000adcf89ef5e0694a374c0f95487c96e40ea84",
+    "vendored_sha256": "b840d52dfbffdcd8fd6b7fd7f7347bb1c3af2ddbd080899e19cf1d5ab2006e9a"
+  },
+  {
+    "file": "extractor_prompt.py",
+    "source": "Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition\\prompts.py",
+    "symbols": [
+      "EXTRACTOR_PROMPT"
+    ],
+    "upstream_sha256": "254bf9c2b7251ea74e59ea7fc07962dcd2ead29be8be23323b2d65eae61628a5",
+    "vendored_sha256": "1ceaca7e3ecffa9dfb280c7b0282262abdbf760b4e056921dd7776c5ad41ad0b"
+  },
+  {
+    "file": "judge_prompt.py",
+    "source": "xbench-evals\\eval_grader.py",
+    "symbols": [
+      "LLM_JUDGE_PROMPT"
+    ],
+    "upstream_sha256": "b9572712863a31205bd1296032345631d43ad65131e84a81a28f53f0b440293e",
+    "vendored_sha256": "44a3422a9efba0c28c558e4e28a981385d162a511cfb3e2e49159a43986b7d86"
+  },
+  {
+    "file": "tool_types.py",
+    "source": "Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition\\tool_types.py",
+    "upstream_sha256": "14884a1a5baca0f4652e76840316c541aca7eb02ee34605e8bf2240d1d698f14",
+    "vendored_sha256": "14884a1a5baca0f4652e76840316c541aca7eb02ee34605e8bf2240d1d698f14"
+  },
+  {
+    "file": "LICENSE.award",
+    "source": "Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition\\LICENSE",
+    "upstream_sha256": "afa5bbf845909de685c9e50cd8b750ff3df58bd806ffd5434730938c038dc222",
+    "vendored_sha256": "afa5bbf845909de685c9e50cd8b750ff3df58bd806ffd5434730938c038dc222"
+  }
+]

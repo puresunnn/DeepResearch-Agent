@@ -1,0 +1,7 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.ps1 text eol=crlf
+# Vendored byte hashes are recorded in SOURCES.json; retain original line endings.
+research_baseline/vendor/** -text whitespace=cr-at-eol
