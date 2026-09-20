@@ -153,8 +153,8 @@ class Agent:
                     self._observe("Research action executed, but state update was rejected; previous state retained. "
                                   + state_error + " Supply only id and changed fields in the next research_state; then one action.")
                 if self.research.constraints:
-                    self._observe(self.research.guidance())
-                    if not new_progress and result.success and call["name"] in {"search", "visit", "find", "read"}:
+                    self._research_context()
+                    if not new_progress and call["name"] in {"search", "visit", "find", "read"}:
                         constraint_stagnant += 1
                     if constraint_stagnant >= 3 and self.progress_checks < 3:
                         self.progress_checks += 1
@@ -185,6 +185,14 @@ class Agent:
     def _observe(self, text):
         self.messages.append({"role": "user", "content": f"<tool_response>\n{text}\n</tool_response>"})
 
+    def _research_context(self):
+        # Keep one current ledger view instead of repeating it in every old turn.
+        self.messages = [m for m in self.messages if not m["content"].startswith("<research_context>")]
+        budgets = {"search_queries_left": max(0, self.settings.max_search_queries - self.tools.counts["search_queries"]),
+                   "new_pages_left": max(0, self.settings.max_visit_pages - self.tools.counts["visit_pages"])}
+        text = self.research.guidance() + "\nRemaining budgets: " + json.dumps(budgets)
+        self.messages.append({"role": "user", "content": "<research_context>\n" + text + "\n</research_context>"})
+
     async def _complete(self, deadline):
         messages = self._audit_messages(research_gap=self.gap_check_pending) if self.audit_pending or self.gap_check_pending else self.messages
         while True:
@@ -206,10 +214,18 @@ class Agent:
     def _audit_messages(self, research_gap=False):
         # Use the already-budgeted review turn with a compact evidence view, so the
         # model rechecks the question rather than copying its prior narrative.
+        # Recent snippets must not displace all previously downloaded source text.
+        observed = [item for item in self.tools.evidence if item.get("kind") == "observed"][-6:]
+        leads = [item for item in self.tools.evidence if item.get("kind") != "observed"][-6:]
         evidence = [{"source_url": item["source_url"], "text": item["text"][:2500],
-                     "metadata": item["metadata"]} for item in self.tools.evidence[-12:]]
+                     "kind": item.get("kind", "lead"), "metadata": item["metadata"]} for item in observed + leads]
+        sources = [{"url": url, "total_chars": len(text), "opening_text": text[:300]}
+                   for url, text in getattr(self.tools, "source_texts", {}).items()]
         payload = {"candidate_to_check": self.candidate, "research_state": self.research.snapshot(),
-                   "observed_evidence": evidence, "calculations": getattr(self.tools, "calculations", [])[-10:]}
+                   "observed_evidence": evidence, "downloaded_sources_for_find_read": sources,
+                   "calculations": getattr(self.tools, "calculations", [])[-10:],
+                   "tool_counts": getattr(self.tools, "counts", {}),
+                   "search_queries_already_attempted": sorted(getattr(self.tools, "queries", []))}
         instruction = ("This is the bounded answer audit, not a fresh research task. Recheck the ORIGINAL question "
                        "against the candidate and source excerpts below. The candidate and ledger are fallible. "
                        "Look for a specific counterexample, unsupported restriction, excluded member, conflicting date, "
@@ -228,6 +244,12 @@ class Agent:
                            "of first mention. For relationships, inspect the authors/affiliations or explicit causal passage. "
                            "If no accessible original source is known, search for its index, primary document or an alternative "
                            "accessible copy. Keep question constraints and update the existing state IDs.\n")
+            instruction += ("If the searches have no useful lead, revise the query assumptions: search the distinctive "
+                            "relationship in the question in isolation before adding generic labels or status codes. "
+                            "Try the question's original language as well as the source language. A clue about an "
+                            "organization does not necessarily describe the subject of the target document. "
+                            "Do not invent named candidates and repeatedly search each without supporting leads. "
+                            "Constraints omitted from a discovery query must still be checked before the answer.\n")
         self.trace.emit("answer_audit_context", candidate=self.candidate, coverage=self.research.coverage(),
                         evidence_items=len(evidence), purpose="research_gap" if research_gap else "answer")
         return self.messages[:2] + [{"role": "user", "content": instruction + json.dumps(payload, ensure_ascii=False)

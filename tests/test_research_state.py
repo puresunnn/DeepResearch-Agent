@@ -12,6 +12,7 @@ from research_baseline.llm import Reply
 from research_baseline.research_state import ResearchState, question_anchor, split_state
 from research_baseline.tools import ToolRunner, page_text
 from research_baseline.trace import Trace
+from research_baseline.vendor.tool_types import ToolResult
 
 
 def constraint(status="open", **extra):
@@ -141,6 +142,39 @@ def test_audit_uses_original_question_and_evidence_not_previous_narrative(tmp_pa
     rendered = json.dumps(messages)
     assert "original question" in rendered and "source passage" in rendered and "candidate" in rendered
     assert "UNSUPPORTED_OLD_NARRATIVE" not in rendered
+
+
+def test_batched_long_pages_keep_all_sources_visible(tmp_path):
+    tools = ToolRunner(Settings(max_tool_result_chars=1200), Trace(tmp_path / "trace"), None, None)
+    combined = tools._combine([ToolResult(content=f"Source: https://s.test/{i}\n" + "x" * 5000) for i in range(3)])
+    assert len(combined.content) <= 1200
+    for i in range(3):
+        assert f"https://s.test/{i}" in combined.content
+
+
+def test_stagnation_reviews_during_research_and_context_does_not_accumulate(tmp_path):
+    async def scenario():
+        trace = Trace(tmp_path / "trace")
+        settings = Settings(max_rounds=5)
+        class Model:
+            calls = []
+            async def complete(self, messages):
+                self.calls.append(json.dumps(messages))
+                index = len(self.calls)
+                prefix = ('<research_state>' + json.dumps({"constraints": [constraint()]}) + '</research_state>') if index == 1 else ''
+                if index > 5:
+                    return Reply('<answer>unresolved</answer>', 'stop')
+                return Reply(prefix + '<tool_call>' + json.dumps({"name": "search", "arguments": {"query": [f"new snippet {index}"]}}) + '</tool_call>', 'stop')
+        model = Model()
+        from research_baseline.mock import transport
+        async with httpx.AsyncClient(transport=transport()) as http:
+            tools = ToolRunner(settings, trace, http, model, mock=True)
+            agent = Agent(settings, trace, model, tools)
+            await agent.run("Find the first mention")
+        assert "Research has stalled" in model.calls[3]
+        assert agent.progress_checks == 1
+        assert all(call.count('<research_context>') <= 1 for call in model.calls)
+    asyncio.run(scenario())
 
 
 def test_gap_review_requests_targeted_read_before_accepting_answer(tmp_path):

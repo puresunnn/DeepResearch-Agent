@@ -10,6 +10,12 @@
 
 2026-09-16 新增轻量约束状态、针对缺口的复查、已下载原文的 `find/read` 定位续读。实现边界与验收记录见 [推理改进记录](REASONING_IMPROVEMENTS.md)。
 
+## Git 管理
+
+本项目的独立 Git 仓库根目录为 `A0_baseline`，默认分支 `main`。代码、测试、配置模板、许可证及报告纳入版本管理；`.env`、虚拟环境、缓存和 `runs/` 实验原始产物只保留在本机。未配置远程仓库。
+
+从 `A0_baseline` 目录执行 `git status` 查看改动、`git log --oneline` 查看历史。验收脚本会记录对应提交及代码哈希。外部评测数据位于工作区同级 `xbench-evals/data/`，未复制进仓库；在其他机器评测时需自行提供数据集路径。
+
 ## 1. 填写密钥
 
 编辑 [本地 .env](<D:/_Deepresearch agent/baseline/.env>)：

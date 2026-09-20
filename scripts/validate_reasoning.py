@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import sys
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,6 +38,11 @@ async def main():
     manifest = {"signature": signature(settings, args.dataset, cases, False, True),
                 "dataset": str(args.dataset.resolve()), "concurrency": args.concurrency,
                 "started_at": datetime.now(timezone.utc).isoformat()}
+    project = Path(__file__).resolve().parents[1]
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project, capture_output=True, text=True)
+    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=project, capture_output=True, text=True)
+    manifest["git"] = {"commit": commit.stdout.strip() if commit.returncode == 0 else None,
+                       "dirty": bool(dirty.stdout.strip()) if dirty.returncode == 0 else None}
     (directory / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Run: {directory}", flush=True)
     gate = asyncio.Semaphore(args.concurrency)

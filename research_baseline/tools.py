@@ -189,9 +189,15 @@ class ToolRunner:
             raise ValueError(f"Invalid {field}")
         return [v.strip() for v in values]
 
-    @staticmethod
-    def _combine(results):
-        return ToolResult(content="\n=======\n".join(r.content for r in results),
+    def _combine(self, results):
+        # Reserve space for every batched source before the agent's output cap.
+        # Otherwise a long first page can hide the next two sources completely.
+        separator = "\n=======\n"
+        share = max(1, (self.settings.max_tool_result_chars - len(separator) * (len(results) - 1)) // len(results))
+        marker = "\n[Excerpt shortened for batch; use find/read on this source to continue.]"
+        blocks = [r.content if len(r.content) <= share else
+                  r.content[:max(0, share - len(marker))] + marker[:share] for r in results]
+        return ToolResult(content=separator.join(blocks),
                           evidence_items=[e for r in results for e in r.evidence_items],
                           metadata={"items": [r.metadata for r in results]}, success=any(r.success for r in results))
 
