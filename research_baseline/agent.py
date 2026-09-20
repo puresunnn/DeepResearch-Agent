@@ -37,6 +37,8 @@ Never include hypothetical tool calls or answers inside the decision summary.
 <tool_call>{"name":"find","arguments":{"url":"downloaded source URL","text":"literal keyword","start":0}}</tool_call>
 <tool_call>{"name":"read","arguments":{"url":"downloaded source URL","start":0,"length":6000}}</tool_call>
 find/read access full downloaded text without another network request, with character offsets.
+Full pages include a named link index. find can locate a chapter/title and its actual URL;
+use the returned link rather than inventing URL paths or numeric chapter IDs.
 Use find on long pages before assuming missing evidence. read continues beyond an excerpt.
 Use only one of these calls per turn. Search/visit arrays may batch independent work.
 For final output: <decision>Brief constraint check.</decision><answer>concise answer</answer>
@@ -234,6 +236,12 @@ class Agent:
                        "Downloaded URLs in the evidence remain available to find/read. Update existing constraint IDs "
                        "with only changed finding/status/evidence/interpretation fields; add a missing constraint if needed. "
                        "Return exactly one tool action, or the checked answer if supported or no useful check remains.\n")
+        if not research_gap:
+            instruction += ("Separate explicit restrictions from assumptions you added. In particular, sharing one "
+                            "attribute does not imply sharing nationality, employer, location, or time period. "
+                            "For 'other/except', explicitly exclude the referenced entity before finding endpoints. "
+                            "If two plausible scopes produce different answers, use the question and complete source "
+                            "list to resolve that ambiguity before accepting the count.\n")
         if research_gap:
             instruction = ("Research has stalled: several tool rounds produced no new source-backed constraint evidence. "
                            "Research budget remains. Choose ONE next action that can resolve a specific missing constraint. "

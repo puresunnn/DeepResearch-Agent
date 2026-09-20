@@ -20,10 +20,14 @@ the eligible population, excluded members and dated records before computing the
 In subsequent turns include the tag only to update changed constraints, reusing IDs.
 Updates need only id and changed fields; keep question_span and requirement unchanged.
 Never emit a state block alone: always follow it with one tool_call or answer.
+For updates omit question_span/requirement entirely. Do not recopy titles containing quotes.
 Status is open, supported, or conflicting. Evidence entries are
 {"url":"downloaded source URL","quote":"short exact original passage"}. Search snippets discover candidates;
 read the page before marking a critical constraint supported. A quote's existence does
 not prove your interpretation: check entity, relation, scope, exceptions and completeness.
+You may instead cite {"url":"downloaded source URL","char_start":100,"char_end":250}
+using actual offsets shown by read/find (at most 1600 characters); the runtime retrieves
+the exact passage. Never concatenate passages with ellipses inside a verbatim quote.
 For derived findings cite the inputs and use calculate for arithmetic. For first/last
 occurrence distinguish title from body, explicit naming from description, and check the
 boundary and earlier coverage. For author questions inspect author order AND affiliations.
@@ -123,12 +127,22 @@ class ResearchState:
                 if not isinstance(ref, dict):
                     raise ValueError("Evidence requires url and quote")
                 url, quote = ref.get("url"), ref.get("quote")
+                if isinstance(url, str) and quote is None:
+                    source = source_texts.get(url, "")
+                    left, right = ref.get("char_start"), ref.get("char_end")
+                    if (type(left) is not int or type(right) is not int or not 0 <= left < right <= len(source)
+                            or not 8 <= right - left <= 1600):
+                        raise ValueError("Evidence offsets require a downloaded URL and an 8..1600 character range")
+                    quote = source[left:right]
                 if not isinstance(url, str) or not isinstance(quote, str) or not 8 <= len(quote) <= 1600:
                     raise ValueError("Evidence needs URL and exact quote of 8..1600 characters")
                 source = source_texts.get(url, "")
                 start = source.find(quote)
+                if ref.get("quote") is None:
+                    start = ref["char_start"]
                 checked.append({"url": url, "quote": quote, "quote_found": start >= 0,
-                                "char_start": start if start >= 0 else None})
+                                "char_start": start if start >= 0 else None,
+                                "char_end": start + len(quote) if start >= 0 else None})
             value["evidence"] = checked
             value["evidence_issue"] = ""
             if value["status"] == "supported" and (not value["finding"] or not checked or not all(r["quote_found"] for r in checked)):

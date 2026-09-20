@@ -10,7 +10,7 @@ from research_baseline.config import Settings
 from research_baseline.contracts import parse_action
 from research_baseline.llm import Reply
 from research_baseline.research_state import ResearchState, question_anchor, split_state
-from research_baseline.tools import ToolRunner, page_text
+from research_baseline.tools import ToolRunner, page_links, page_text
 from research_baseline.trace import Trace
 from research_baseline.vendor.tool_types import ToolResult
 
@@ -26,6 +26,36 @@ def test_full_source_preserves_author_header_outside_article():
     assert "First Author — Institute A" in text
     assert "citation_author: First Author" in text
     assert "Abstract only" in text and "unsafe_script" not in text
+
+
+def test_late_index_links_keep_titles_and_allow_navigation(tmp_path):
+    async def scenario():
+        url = "https://source.test/catalog"
+        html = '<html><body>' + ''.join(f'<a href="/chapter/{i}">Section {i}</a>' for i in range(300)) + '</body></html>'
+        tools = ToolRunner(Settings(), Trace(tmp_path / "trace"), None, None)
+        async def download(target):
+            return html.encode(), "text/html", target, "utf-8"
+        tools._download = download
+        tools.observed_urls.add(url)
+        assert (await tools.execute("visit", {"url": url})).success
+        assert "https://source.test/chapter/299" in tools.observed_urls
+        found = await tools.execute("find", {"url": url, "text": "Section 299"})
+        assert "Section 299 | https://source.test/chapter/299" in found.content
+        assert (await tools.execute("visit", {"url": "https://source.test/chapter/299"})).success
+        assert not (await tools.execute("visit", {"url": "https://source.test/unseen"})).success
+    asyncio.run(scenario())
+
+
+def test_evidence_offsets_retrieve_original_text_and_reject_invalid_ranges():
+    source = 'Introduction. Exact source passage with "quotes" and a newline.\nNext.'
+    state = ResearchState("Find the first mention")
+    state.update({"constraints": [constraint("supported", finding="Found", evidence=[
+        {"url": "https://source.test", "char_start": 14, "char_end": 62}])]}, {"https://source.test": source})
+    assert state.constraints["c1"]["evidence"][0]["quote"] == source[14:62]
+    assert state.coverage()["supported"] == 1
+    with pytest.raises(ValueError, match="offsets"):
+        state.update({"constraints": [{"id": "c1", "evidence": [
+            {"url": "https://unknown.test", "char_start": 0, "char_end": 30}]}]}, {})
 
 
 def test_unsupported_claims_cannot_be_promoted_and_updates_are_atomic():

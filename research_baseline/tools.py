@@ -44,6 +44,21 @@ def page_text(soup):
     return "\n".join(metadata) + "\n" + visible
 
 
+def page_links(soup, base_url):
+    """Retain named navigation targets, including entries late in long indexes."""
+    links = {}
+    for anchor in soup.find_all("a", href=True):
+        url = urljoin(base_url, anchor["href"])
+        if urlsplit(url).scheme not in {"https", "http"} or len(url) > 2000:
+            continue
+        title = anchor.get_text(" ", strip=True)[:250]
+        if url not in links or (title and not links[url]):
+            links[url] = title
+        if len(links) >= 5000:
+            break
+    return links
+
+
 def calculate(expression):
     """Restricted arithmetic, not arbitrary Python execution."""
     if not isinstance(expression, str) or len(expression) > 300:
@@ -304,12 +319,13 @@ class ToolRunner:
                         html = raw.decode(encoding, errors="replace")
                         if "html" in content_type or "<html" in html[:1000].lower():
                             soup = BeautifulSoup(html, "html.parser")
-                            links = [urljoin(final_url, a["href"]) for a in soup.find_all("a", href=True)][:100]
-                            self.observed_urls.update(link for link in links if urlsplit(link).scheme in {"https", "http"})
+                            links = page_links(soup, final_url)
+                            self.observed_urls.update(links)
                             # Preserve row boundaries rather than flattening every table cell.
                             for table in soup.find_all("table"):
                                 table.replace_with("\n" + "\n".join(" | ".join(cell.get_text(" ", strip=True) for cell in row.find_all(["th", "td"])) for row in table.find_all("tr")) + "\n")
-                            text = page_text(soup) + ("\n\nLinks:\n" + "\n".join(links) if links else "")
+                            index = "\n".join(f"{title} | {link}" for link, title in links.items())
+                            text = page_text(soup) + ("\n\nLink index (anchor text | URL):\n" + index if links else "")
                         elif "image/" in content_type or "video/" in content_type:
                             raise ValueError("Visual media is not supported by this text baseline")
                         else:
