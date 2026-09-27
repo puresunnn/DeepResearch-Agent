@@ -17,3 +17,9 @@ dist/
 *.key
 *.p12
 *.pfx
+
+# Local development notes
+/HANDOFF_REASONING_IMPROVEMENTS.md
+/REASONING_IMPROVEMENTS.md
+/RELIABILITY_FIXES.md
+/TEST_REPORT.md
