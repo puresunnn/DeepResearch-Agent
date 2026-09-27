@@ -6,7 +6,9 @@
 
 DeepResearch Agent 用于回答需要多轮搜索、原文核验、跨来源推理与数值计算的复杂问题。系统将一次研究组织为 **问题约束 → 检索与阅读 → 证据核验 → 缺口复查 → 答案输出** 的闭环，保留每轮决策摘要、工具调用、引用原文和评测结果，便于定位漏掉条件、证据不足或过早作答等问题。
 
-本仓库对应 `A0_baseline` 实现。部分协议解析、搜索结果格式化和正文提取代码复用自 [Research Agent 开源竞赛方案](https://github.com/yiming-qing/Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition)，评测提示词来自 [xbench-evals](https://github.com/xbench-ai/xbench-evals)。具体复用范围与许可证见文末；本仓库不将上游竞赛名次作为自身成绩。
+
+
+
 
 ## 技术框架
 
