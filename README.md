@@ -195,12 +195,5 @@ scripts/                 # 来源校验及研究行为验证脚本
 
 任务产物写入 `runs/`，包括逐题 `events.jsonl`、`messages.json`、`evidence.json`、`research_state.json` 和 `result.json`；批量运行额外生成 `manifest.json`、`results.jsonl`、`summary.json` 与 `REPORT.md`。`.env`、虚拟环境和运行产物由 `.gitignore` 排除。
 
-## 实现范围与来源
 
-当前实现面向文本检索研究，支持公开 HTML 与文本型 PDF。浏览器交互、图片/视频理解和扫描件 OCR 尚未实现；遇到动态页面、登录内容或语义复杂的证据关系时，仍可能存在信息缺口。
 
-- **Research Agent 竞赛开源方案**：复用协议解析、搜索格式化、HTML 提取、摘要提示词和工具数据类型。来源见 [`vendor/SOURCES.json`](research_baseline/vendor/SOURCES.json)，许可证见 [`LICENSE.award`](research_baseline/vendor/LICENSE.award)。
-- **xbench-evals**：复用评分提示词，支持其数据加载方式。许可证见 [`LICENSE.xbench`](research_baseline/vendor/LICENSE.xbench)。
-- **本仓库工程化扩展**：独立运行器、约束证据账本、全文定位、协议与接口恢复、执行预算、轨迹记录、带签名的断点续跑及实验报告。
-
-上游代码保留原有来源与许可说明。框架介绍与能力范围以本仓库实际实现为准。
