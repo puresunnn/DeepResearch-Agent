@@ -16,7 +16,7 @@ DEFAULT_DATASET = PROJECT.parent / "xbench-evals/data/DeepSearch-2510.smoketest.
 class Settings:
     api_key: str = ""
     base_url: str = "https://llm.talkweb.com.cn/v1"
-    agent_model: str = "qwen3.7-plus"
+    agent_model: str = "gpu-deepseek-v4-flash"
     judge_model: str = "qwen3.7-max"
     search_provider: str = "serper"
     serper_api_key: str = ""

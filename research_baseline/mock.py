@@ -7,7 +7,7 @@ import httpx
 def transport():
     def handler(request):
         if request.url.path.endswith("/models"):
-            return httpx.Response(200, json={"data": [{"id": "qwen3.7-plus"}, {"id": "qwen3.7-flash"}, {"id": "qwen3.7-max"}]})
+            return httpx.Response(200, json={"data": [{"id": "gpu-deepseek-v4-flash"}, {"id": "qwen3.7-plus"}, {"id": "qwen3.7-flash"}, {"id": "qwen3.7-max"}]})
         if request.url.path.endswith("/chat/completions"):
             body = json.loads(request.content)
             messages = body["messages"]

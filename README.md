@@ -1,159 +1,204 @@
-# xbench ReAct Baseline
+# DeepResearch Agent — 面向多跳问答的证据驱动研究智能体
 
-基于工作区第一名 Research Agent 项目改造的单主控基线。默认模型为 `qwen3.7-plus`，通过 `https://llm.talkweb.com.cn/v1` 调用 New API 兼容接口。搜索、网页/PDF 读取和受限算术计算已接入；每道题都有独立运行轨迹。
+> 阿里云 Data+AI 工程师全球大奖赛（高校赛道）Research Agent 参赛方向的项目整理与工程化实践。
+>
+> 基于开源竞赛方案的 ReAct 范式，围绕证据约束、长链路检索、异常恢复和可复现评测构建的 Python 研究框架。
 
-当前验证：41 项自动化测试通过。2026-09-15 针对 105、127、191 的工程修复完成两轮真实复测，最终一轮 3/3 正常完成，答案评分 2/3；105 的推理错误单列保留。[工程修复与复测记录](RELIABILITY_FIXES.md)
+DeepResearch Agent 用于回答需要多轮搜索、原文核验、跨来源推理与数值计算的复杂问题。系统将一次研究组织为 **问题约束 → 检索与阅读 → 证据核验 → 缺口复查 → 答案输出** 的闭环，保留每轮决策摘要、工具调用、引用原文和评测结果，便于定位漏掉条件、证据不足或过早作答等问题。
 
-历史验证：10/10 题模拟链路完成；真实 10 题本地适配评分为 5/10。[测试记录](<D:/_Deepresearch agent/baseline/TEST_REPORT.md>)
+本仓库对应 `A0_baseline` 实现。部分协议解析、搜索结果格式化和正文提取代码复用自 [Research Agent 开源竞赛方案](https://github.com/yiming-qing/Research-Agent---1st-place-in-Alibaba-Cloud-Data-AI-Competition)，评测提示词来自 [xbench-evals](https://github.com/xbench-ai/xbench-evals)。具体复用范围与许可证见文末；本仓库不将上游竞赛名次作为自身成绩。
 
-这是文本工具 baseline。完整浏览器交互、视觉/视频、复杂表格专用解析和动态证据依赖图暂未接入。10 题冒烟集含视觉等题型，因此链路跑通不代表所有题型具备解题能力。
+## 技术框架
 
-2026-09-16 新增轻量约束状态、针对缺口的复查、已下载原文的 `find/read` 定位续读。实现边界与验收记录见 [推理改进记录](REASONING_IMPROVEMENTS.md)。
+采用 Python + asyncio 实现，核心控制流由 `Agent` 显式管理，通过 OpenAI 兼容的 Chat Completions 接口接入模型。当前提供命令行问答、批量评测和轨迹检查入口。
 
-## Git 管理
+```mermaid
+flowchart TD
+    Q[问题 / 评测数据集] --> R[CLI 与任务运行器]
+    R --> A[Agent：ReAct 研究循环]
+    A <--> S[ResearchState：约束与证据账本]
+    A --> L[模型接口：决策与动作生成]
+    L --> P[协议解析与格式修复]
+    P --> T[ToolRunner：工具执行]
+    T --> Search[search：Serper / 阿里 IQS]
+    T --> Visit[visit：HTML / PDF / Jina 回退]
+    T --> Read[find / read：原文定位与分段读取]
+    T --> Calc[calculate：受限算术求值]
+    Search --> O[工具观察与来源记录]
+    Visit --> O
+    Read --> O
+    Calc --> O
+    O --> A
+    P --> V[候选答案与约束复查]
+    V -->|仍有关键缺口| A
+    V -->|完成或预算收尾| F[答案、状态与证据覆盖率]
+    A -.-> Trace[事件日志与任务产物]
+    F --> Eval[独立评分与实验报告]
+```
 
-本项目的独立 Git 仓库根目录为 `A0_baseline`，默认分支 `main`。代码、测试、配置模板、许可证及报告纳入版本管理；`.env`、虚拟环境、缓存和 `runs/` 实验原始产物只保留在本机。未配置远程仓库。
+| 层次 | 核心模块 | 职责 |
+| --- | --- | --- |
+| 执行入口 | `__main__.py`、`runner.py` | 配置检查、单题问答、批量运行、断点续跑 |
+| 研究控制 | `agent.py` | ReAct 循环、答案审查、停滞检测、上下文压缩与预算收尾 |
+| 研究状态 | `research_state.py` | 问题约束、证据引用、冲突与未解决项 |
+| 动作协议 | `contracts.py` | 调用解析、格式修复、答案归一化 |
+| 工具执行 | `tools.py` | 搜索、网页/PDF 阅读、原文定位、计算、缓存与并发控制 |
+| 模型通信 | `llm.py` | API 调用、超时重试、用量统计 |
+| 评测与观测 | `evaluation.py`、`trace.py`、`report.py` | 独立判分、事件记录、汇总指标与报告 |
 
-从 `A0_baseline` 目录执行 `git status` 查看改动、`git log --oneline` 查看历史。验收脚本会记录对应提交及代码哈希。外部评测数据位于工作区同级 `xbench-evals/data/`，未复制进仓库；在其他机器评测时需自行提供数据集路径。
+## 核心设计
 
-## 1. 填写密钥
+### 1. ReAct 循环与有界执行
 
-编辑 [本地 .env](<D:/_Deepresearch agent/baseline/.env>)：
+模型每轮输出简短的 `<decision>` 决策摘要，并选择一个 `<tool_call>` 或 `<answer>`。控制器解析动作、执行工具，再将观察结果送入下一轮。搜索和访问支持数组参数，可并发处理相互独立的查询与 URL。
+
+研究过程同时受轮数、总时间、搜索次数、访问页数与并发数约束。默认最多执行 30 轮、运行 600 秒，并预留 45 秒用于收尾。连续缺少新证据时提示调整来源、语言或候选；达到停止条件后基于已有证据收尾，返回 `best_effort` 或 `no_answer` 等状态，保留停止原因。
+
+### 2. 将问题条件绑定到原文证据
+
+`ResearchState` 维护小型约束账本，每项记录题目原文片段、需要确认的事实、当前发现、状态和证据引用。状态分为 `open`、`supported`、`conflicting`，用于跟踪时间范围、排除条件、实体关系、计数口径等容易遗漏的限制。
+
+证据以“已下载 URL + 原文引句”或字符区间表示。运行时检查引句是否确实出现在下载文本中，保存定位信息；未通过校验的引用不能直接支撑已解决状态。后续更新保留原始问题锚点，减少研究过程中改写题意的风险。
+
+原文匹配验证的是引用存在性，语义支持关系仍由模型审查。最终结果同时返回 `constraint_coverage` 和 `evidence_complete`，便于识别已有答案但仍有条件未核实的情况。
+
+### 3. 搜索、深读与计算分工
+
+| 工具 | 实现与用途 |
+| --- | --- |
+| `search` | 按配置选择 Serper 或阿里 IQS，批量查询并统一结果格式，发现候选来源 |
+| `visit` | 获取公开页面，解析 HTML 或文本型 PDF；直接获取失败时可通过 Jina 回退，可选启用目标导向摘要 |
+| `find` | 在已下载全文中查找字面关键词，返回字符位置，定位深层证据 |
+| `read` | 按字符区间继续读取已下载全文，避免只依赖首段摘要，不重复发起网络请求 |
+| `calculate` | 基于受限 AST 执行算术表达式，记录计算结果，辅助数值题核验 |
+
+网页处理保留带名称的链接索引，模型可根据章节标题找到实际 URL，再继续访问。完整下载文本保存在任务内存中供定位和引用核验使用；模型上下文接收受长度限制的工具结果。
+
+### 4. 答案复查与研究停滞检测
+
+首次提出候选答案后，控制器触发约束审查，要求重新检查问题中的范围、排除项和证据缺口。约束长期没有推进时，系统再次组织缺口复查，引导搜索最有区分度的缺失事实，减少重复收集支持同一候选的页面。
+
+复查有次数上限，无法解决的条件继续保持开放状态。系统通过返回状态和覆盖信息表达研究结果。
+
+### 5. 长链路可靠性
+
+- **协议恢复**：先尝试本地容错解析；无法修复时在有限次数内要求模型重生成，记录原始输出与错误原因。
+- **接口恢复**：区分可重试与不可重试错误，设置请求级重试和任务级恢复预算，保留已有消息与证据。
+- **上下文压缩**：超过字符预算后保留问题、当前候选、约束账本、近期证据、计算结果与最近消息。
+- **任务隔离**：每题单独创建 Agent、工具状态与轨迹目录，避免跨题污染。
+- **可观测性**：记录工具调用、页面读取、协议错误、用量、收尾原因和状态变化；日志写入时脱敏已配置密钥。
+
+## 评测与复现
+
+运行器接收 CSV 或 JSONL，Agent 只读取问题；标准答案交给独立评分阶段。评分先做精确匹配，再按需使用 xbench 的 LLM-as-judge 提示词。Judge 异常保留为未评分状态，所有选定题目完成评分后才输出完整准确率，失败题保留在分母中。
+
+每次批量实验记录代码哈希、数据集哈希、题目集合、配置及运行模式。续跑前校验实验签名，跳过已有结果，防止改变模型、数据或代码后混用结果。报告汇总完成状态、判分、Token 用量、搜索调用、延迟及可选费用估算。
+
+Mock 模式用于验证执行链路，不代表真实检索能力或竞赛成绩。当前 README 不声明未经本版本完整评测验证的准确率。
+
+## 快速开始
+
+建议使用 Python 3.11+。以下为 Windows PowerShell 示例：
+
+```powershell
+git clone https://github.com/puresunnn/DeepResearch-Agent.git
+cd DeepResearch-Agent
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+编辑 `.env`，填写模型网关与搜索服务配置。模型名使用所选网关实际提供的标识；主模型、摘要模型与评分模型可以分别配置。
 
 ```dotenv
-NEWAPI_API_KEY=你在llm.talkweb.com.cn创建的API令牌
-NEWAPI_BASE_URL=https://llm.talkweb.com.cn/v1
-AGENT_MODEL=qwen3.7-plus
-
+NEWAPI_BASE_URL=https://your-model-gateway.example/v1
+NEWAPI_API_KEY=your-model-api-key
+AGENT_MODEL=your-agent-model
 SEARCH_PROVIDER=serper
-SERPER_API_KEY=你的Serper搜索Key
+SERPER_API_KEY=your-serper-api-key
 ```
 
-`NEWAPI_API_KEY` 不是网页登录密码。模型网关 Key 不能替代搜索 Key。若已有 IQS，将 `SEARCH_PROVIDER=iqs` 并填 `IQS_API_KEY`，不需要 Serper。网页首先直接 HTTP 获取，`JINA_API_KEY` 是可选备用。
-
-环境变量优先于 `.env`；可用 `--env-file` 显式指定其他配置。默认不会自动读取参考项目里的密钥。所有输出自动过滤已配置密钥和 Authorization 字段。
-
-New API 的 Chat Completions 路径为 `/v1/chat/completions`，认证是 Bearer token；模型列表路径为 `/v1/models`。[接口文档](https://docs.newapi.pro/zh/docs/api/ai-model/chat/openai/createchatcompletion)
-
-具体模型的访问权限、额度、思考参数与非流式支持仍取决于网关渠道。默认 `LLM_EXTRA_BODY={}`，不写死 DashScope 专用参数；如渠道要求禁用思考，可设置 `LLM_EXTRA_BODY={"enable_thinking":false}`。API 错误会写入轨迹，不会伪装成正常答案。
-
-## 2. 本机运行
-
-当前工作区已创建独立 `baseline/.venv`。在 PowerShell 中：
+检查配置并执行单题问答：
 
 ```powershell
-Set-Location 'D:\_Deepresearch agent\baseline'
-
-# 不联网，检查配置是否齐全
-.\run.ps1 check
-
-# 不需要任何 Key；全部 HTTP 调用使用确定性模拟响应
-.\run.ps1 smoke --mock
-
-# 填写 Key 后检查模型列表和一次最小生成（会产生少量模型调用费用）
-.\run.ps1 check --live
-
-# 先跑 1 题，检查真实的 模型→搜索→网页→答案→Judge 链路
-.\run.ps1 smoke --limit 1 --judge
-
-# 完整 10 题；逐题执行，单题内部最多 3 个工具请求并发
-.\run.ps1 smoke --judge
-
-# 单题调试，不进行 gold 评分
-.\run.ps1 ask '查找并回答你的问题'
-
-# 仅测试指定样本；保持数据集原始顺序
-.\run.ps1 smoke --ids '152,140' --judge
+.\.venv\Scripts\python.exe -m research_baseline check
+.\.venv\Scripts\python.exe -m research_baseline ask "2024年图灵奖由谁获得？请核对官方来源。"
 ```
 
-如果 PowerShell 执行策略阻止脚本，不必修改全局策略，直接用：
+`check` 只做本地配置检查；追加 `--live` 会请求模型列表并发送一次最小模型调用。无需真实服务即可验证 Mock 链路：
 
 ```powershell
-.\.venv\Scripts\python.exe -X utf8 -m research_baseline smoke --mock
+.\.venv\Scripts\python.exe -m research_baseline ask "What is the capital of France?" --mock
+.\.venv\Scripts\python.exe -m pytest tests -q
 ```
 
-新机器需要 Python 3.12+，在 `baseline` 目录创建环境并安装锁定依赖：
+### 批量评测
+
+准备自己的数据文件，例如 `data/questions.jsonl`，每行包含唯一 `id`、`question` 和参考 `answer`：
+
+```json
+{"id":"demo-001","question":"What is the capital of France?","answer":"Paris"}
+```
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env # 仅首次执行，不要覆盖已填写配置
+# 评分前需配置 JUDGE_MODEL
+.\.venv\Scripts\python.exe -m research_baseline smoke --dataset data/questions.jsonl --judge
+
+# 从已有批次恢复，参数与原实验保持一致
+.\.venv\Scripts\python.exe -m research_baseline smoke --dataset data/questions.jsonl --judge --resume runs/<run-id>
+
+# 路径使用实际生成的任务目录
+.\.venv\Scripts\python.exe -m research_baseline inspect runs/<run-id>/<task-dir>
 ```
 
-## 3. 运行轨迹与恢复
+CSV 支持 `prompt` 或 `question` 列，以及 `answer`、可选的 `id` 和 `type` 列。仓库不包含评测数据，独立克隆后应显式传入 `--dataset`；代码中的默认路径指向开发工作区相邻的 `xbench-evals` 目录。
 
-每次运行创建新目录；每道题、每次尝试隔离：
+### 关键配置
+
+| 配置 | 默认值 | 用途 |
+| --- | --- | --- |
+| `SEARCH_PROVIDER` | `serper` | 选择 `serper` 或 `iqs` 搜索后端 |
+| `MAX_ROUNDS` | `30` | 研究循环上限 |
+| `TASK_TIMEOUT_SECONDS` | `600` | 单题时间预算 |
+| `FINAL_RESERVE_SECONDS` | `45` | 答案收尾预留时间 |
+| `MAX_SEARCH_QUERIES` / `MAX_VISIT_PAGES` | `30` / `15` | 搜索与页面访问预算 |
+| `MAX_TOOL_CONCURRENCY` | `3` | 单次工具批量执行的并发上限 |
+| `MAX_CONTEXT_CHARS` | `100000` | 触发上下文压缩的字符阈值 |
+| `EXTRACTOR_ENABLED` | `false` | 是否启用额外网页摘要模型 |
+| `JINA_API_KEY` | 空 | 可选的网页读取回退服务凭据 |
+| `RESEARCH_AS_OF` | 空 | 显式设置历史研究时间锚点 |
+
+完整配置见 [`.env.example`](.env.example)。模型、搜索和可选网页读取服务分别配置凭据。
+
+## 代码与运行产物
 
 ```text
-runs/<UTC时间_随机ID>/
-  manifest.json               数据/代码哈希、公开配置、题目ID、mock/live 模式
-  results.jsonl               每题最终结果与评分，完成一题立即追加
-  summary.json               完成率、准确率、失败数、累计 token、搜索 API 调用与费用
-  REPORT.md                  自动生成的实验总览、逐题指标和错误诊断
-  tasks/<题目ID_哈希>/attempt_001/
-    task.json                只有题目与推理配置，不含gold和reference_steps
-    events.jsonl             按顺序记录，事件逐条flush
-    messages.json            模型对话快照（包括压缩后的当前上下文）
-    evidence.json            搜索线索与读到的网页证据
-    result.json              状态、答案、停止原因、耗时、调用统计
-    artifacts/*.txt          网页正文及引用片段对应的原始文本
-    judge/                   与Agent轨迹隔离的离线评分记录
+research_baseline/
+├── __main__.py          # CLI：check / ask / smoke / inspect
+├── agent.py             # ReAct 循环与复查、收尾策略
+├── research_state.py    # 约束账本与原文引用核验
+├── contracts.py         # 动作协议与答案格式
+├── tools.py             # 搜索、访问、定位、计算
+├── llm.py               # 模型通信与错误恢复
+├── runner.py            # 任务隔离、批量运行与续跑
+├── evaluation.py        # 数据加载、判分与哈希
+├── trace.py             # 事件记录与脱敏
+├── report.py            # 实验报告生成
+├── config.py            # 环境变量配置与校验
+├── mock.py              # 确定性 HTTP 测试替身
+└── vendor/              # 复用代码、来源清单与许可证
+tests/                   # 协议、工具、可靠性与研究状态测试
+scripts/                 # 来源校验及研究行为验证脚本
 ```
 
-`events.jsonl` 包含模型请求与响应、返回的 usage/reasoning_content（若提供）、简短行动说明、工具参数和返回、搜索 API 请求/响应状态及耗时、网页正文路径、候选答案、错误、压缩和任务结束事件。返回的 reasoning_content 仅作为接口原始响应记录，不拿来解析工具调用或答案。
+任务产物写入 `runs/`，包括逐题 `events.jsonl`、`messages.json`、`evidence.json`、`research_state.json` 和 `result.json`；批量运行额外生成 `manifest.json`、`results.jsonl`、`summary.json` 与 `REPORT.md`。`.env`、虚拟环境和运行产物由 `.gitignore` 排除。
 
-每次 `smoke` 数据集实验结束（包括部分失败）都会在 run 目录生成 `REPORT.md`。报告包含任务完成率、本地适配评分、Agent/Judge token、墙钟时间、页面与计算工具调用、搜索 API 请求量和独立费用，以及未通过任务的答案、Judge 说明与执行异常。旧 run 没有采集到的指标会显示“未采集”，不会按 0 处理。
+## 实现范围与来源
 
-模型 API 失败、解析失败、工具失败、无答案、预算不足分别记录。`completed` 表示模型已输出答案，不等于答案正确；`best_effort` 表示预算/轮数不足时的候选回退。网页证据状态为 `observed`，不会仅因抓取成功就宣称 `verified`。
+当前实现面向文本检索研究，支持公开 HTML 与文本型 PDF。浏览器交互、图片/视频理解和扫描件 OCR 尚未实现；遇到动态页面、登录内容或语义复杂的证据关系时，仍可能存在信息缺口。
 
-快速浏览轨迹：
+- **Research Agent 竞赛开源方案**：复用协议解析、搜索格式化、HTML 提取、摘要提示词和工具数据类型。来源见 [`vendor/SOURCES.json`](research_baseline/vendor/SOURCES.json)，许可证见 [`LICENSE.award`](research_baseline/vendor/LICENSE.award)。
+- **xbench-evals**：复用评分提示词，支持其数据加载方式。许可证见 [`LICENSE.xbench`](research_baseline/vendor/LICENSE.xbench)。
+- **本仓库工程化扩展**：独立运行器、约束证据账本、全文定位、协议与接口恢复、执行预算、轨迹记录、带签名的断点续跑及实验报告。
 
-```powershell
-.\run.ps1 inspect 'D:\_Deepresearch agent\baseline\runs\实际run目录\tasks\实际task目录\attempt_001'
-Get-Content '实际任务目录\events.jsonl' -Tail 20 -Wait
-```
-
-断点续跑使用原来完全相同的选择和模式参数：
-
-```powershell
-.\run.ps1 smoke --judge --resume 'D:\_Deepresearch agent\baseline\runs\实际run目录'
-```
-
-已完成尝试全部保留，包括错误题；不会只重跑错误然后拼高分。配置、代码、数据、题目选择或 Judge 模式变化将拒绝续跑，应开启新 run。修复鉴权后可以继续未执行题；之前记为失败的题需要另开运行评测。任务执行到一半中断时，下次为该题创建新 attempt，旧轨迹保留。
-
-## 4. 冒烟与评分口径
-
-默认读取工作区 `xbench-evals/data/DeepSearch-2510.smoketest.csv`，10 个 id 为 `152,140,139,123,110,137,186,169,191,104`。也支持其他明文/原始加密 CSV，以及 question/answer JSONL。
-
-- `--mock` 使用真实数据集作为输入，但搜索、模型、网页全部是模拟 HTTP fixtures，固定最终答案 `MOCK_PIPELINE_OK`。用它验证加载、协议、工具执行、计算、落盘与恢复；**不代表真实联网成功，不输出 benchmark 准确率**。不允许与 `--judge` 混用。
-- 默认 live 只跑推理链路；`--judge` 才离线评分。先严格匹配答案，否则复用本地 xbench 的 Judge prompt，通过配置的 `JUDGE_MODEL` 调用网关。
-- 评分器与官方 Judge 模型可能不同，报告应称“本地适配评分”。Judge/API/解析故障单独标为未评分，不默认为错误；直到全体被评分才给出 accuracy，同时保留确认正确数/全体题数。
-- Agent 执行失败在有 Judge 模式时记 0，仍在总题数分母中。没有密钥时生成 `preflight.json`，标明阻塞原因，不制造推理结果。
-- gold、reference_steps、人工类别从不交给 solver。Judge 的请求与结果写入独立目录。
-- 默认没有币价假设：费用显示 `null`，但始终记录真实调用量。可填 `.env` 的人民币/百万 token 价格估算单模型费用；混合抽取模型时不使用一个单价误算。搜索 API 单独记录请求数、成功/失败/取消数、累计耗时，并可通过 `SEARCH_PRICE_PER_1000_REQUESTS` 按当前套餐折算人民币费用。Jina、失败请求是否实际计费和 Judge 费用仍需按供应商账单核对。
-
-## 5. 复用范围与代码
-
-没有直接导入原项目 runtime：原代码在 import 时创建厂商固定客户端，且使用全局状态，不适合逐题隔离。保留其可复用部分并拆分配置/日志/HTTP 执行层：
-
-| 来源 | 复用内容 |
-|---|---|
-| 第一名项目 agent_loop.py | ReAct 执行方式、XML 工具/答案协议、多格式容错解析、答案清理 |
-| 第一名项目 tools_search.py | Serper/IQS 结果格式化、搜索证据结构与解析 |
-| 第一名项目 tools_visit.py / prompts.py | BeautifulSoup 正文提取、结构化网页抽取解析与抽取提示 |
-| 第一名项目 tool_types.py | 原样复用 ToolResult / EvidenceItem |
-| xbench-evals/eval_grader.py | 原样提取 LLM_JUDGE_PROMPT；更换传输与可观测错误处理 |
-
-源码位于 `research_baseline/vendor`，MIT 许可证和来源 SHA256 记录在同目录。提取脚本是 `scripts/vendor_sources.py`；生成文件的修改应更新来源记录。没有沿用原提示中强制最低轮数、“多数来源可忽略年份冲突”等策略。原基线的同步搜索传输改为异步，使批量工具请求和统一超时生效；未启用 embedding、独立路由模型和多Agent角色。
-
-新增模块：`agent.py` 为有界 ReAct 控制层；`llm.py` 对接 New API；`tools.py` 执行工具；`trace.py` 保存轨迹；`runner.py/evaluation.py` 管理逐题运行、恢复和评分。
-
-## 6. 测试
-
-```powershell
-.\.venv\Scripts\python.exe -X utf8 -m pytest -q
-```
-
-测试针对真实风险：HTTP 鉴权/重试、推理内容不被当工具执行、共享预算、计算约束、私网访问拦截、gold隔离、密钥脱敏、错误评分、断点配置一致性和完整模拟链路。
-
-`.env`、`runs/` 和本地虚拟环境均被忽略。轨迹可能包含 benchmark 明文与网页内容，仅留本地调试，不上传公开仓库。
+上游代码保留原有来源与许可说明。框架介绍与能力范围以本仓库实际实现为准。
