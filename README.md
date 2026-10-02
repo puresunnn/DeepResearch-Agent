@@ -12,6 +12,9 @@ DeepResearch Agent 用于回答需要多轮搜索、原文核验、跨来源推�
 
 https://github.com/user-attachments/assets/ad68d91c-ae31-43c2-948b-8f247e2b0fc8
 
+## 基本架构
+
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/695f5402-d40a-4833-8681-3b48b7b7bcc5" />
 
 
 ## 技术框架
