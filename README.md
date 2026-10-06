@@ -1,4 +1,4 @@
-# DeepResearch Agent — 面向多跳问答的证据驱动研究智能体
+# DeepResearch Agent 面向多跳问答的证据驱动研究智能体
 
 > 阿里云 Data+AI 工程师全球大奖赛（高校赛道）Research Agent 参赛方向的项目整理与工程化实践。
 >
